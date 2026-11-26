@@ -1,0 +1,23 @@
+name: Vigilar dominio
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # cada 5 minutos (GitHub puede atrasarlo algunos minutos)
+  workflow_dispatch:         # permite ejecutarlo a mano desde la pestaña Actions
+
+jobs:
+  revisar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Consultar WHOIS de NIC Chile
+        env:
+          DOMINIO: ${{ secrets.DOMINIO }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
+          PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
+        run: python vigilar_dominio.py --una-vez
