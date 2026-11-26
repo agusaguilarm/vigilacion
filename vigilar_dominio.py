@@ -38,17 +38,42 @@ WHOIS_SERVER = "whois.nic.cl"
 WHOIS_PORT = 43
 
 
-def consultar_whois(dominio: str, timeout: float = 15.0) -> str:
-    """Consulta el WHOIS de NIC Chile y devuelve la respuesta como texto."""
-    with socket.create_connection((WHOIS_SERVER, WHOIS_PORT), timeout=timeout) as s:
-        s.sendall((dominio + "\r\n").encode("utf-8"))
-        partes = []
-        while True:
-            datos = s.recv(4096)
-            if not datos:
-                break
-            partes.append(datos)
-    return b"".join(partes).decode("utf-8", errors="replace")
+def _consultar_una_vez(dominio: str, timeout: float) -> str:
+    # Probar primero las direcciones IPv4: algunos servidores (como los de
+    # GitHub Actions) no tienen IPv6 y fallan con "Network is unreachable".
+    direcciones = socket.getaddrinfo(WHOIS_SERVER, WHOIS_PORT, type=socket.SOCK_STREAM)
+    direcciones.sort(key=lambda d: 0 if d[0] == socket.AF_INET else 1)
+    ultimo_error: Exception | None = None
+    for familia, tipo, proto, _, direccion in direcciones:
+        try:
+            with socket.socket(familia, tipo, proto) as s:
+                s.settimeout(timeout)
+                s.connect(direccion)
+                s.sendall((dominio + "\r\n").encode("utf-8"))
+                partes = []
+                while True:
+                    datos = s.recv(4096)
+                    if not datos:
+                        break
+                    partes.append(datos)
+            return b"".join(partes).decode("utf-8", errors="replace")
+        except OSError as e:
+            ultimo_error = e
+    raise ultimo_error or OSError("No se pudo resolver " + WHOIS_SERVER)
+
+
+def consultar_whois(dominio: str, timeout: float = 15.0, intentos: int = 4) -> str:
+    """Consulta el WHOIS de NIC Chile, reintentando ante fallas de red."""
+    for intento in range(1, intentos + 1):
+        try:
+            return _consultar_una_vez(dominio, timeout)
+        except OSError as e:
+            if intento == intentos:
+                raise
+            espera = 5 * intento
+            print(f"  Falla de red ({e}); reintento {intento}/{intentos - 1} en {espera} s...")
+            time.sleep(espera)
+    raise RuntimeError("inalcanzable")
 
 
 def normalizar(texto: str) -> str:
